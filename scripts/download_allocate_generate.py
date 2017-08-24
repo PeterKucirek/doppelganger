@@ -17,6 +17,49 @@ from doppelganger import (
 import fetch_puma_data_from_db
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+                '''Run doppelganger on a state and puma
+                1. Download pums data from a database if necessary.
+                    Skipped if data is already found.
+                2. Fetch census marginal data
+                3. Generate population
+                '''
+            )
+    parser.add_argument('--puma_tract_mappings_csv', type=lambda x: is_valid_file(parser, x),
+                        help='csv with (state, county, tract, puma)',
+                        default='./examples/sample_data/2010_puma_tract_mapping.txt')
+    parser.add_argument('--config_file', type=lambda x: is_valid_file(parser, x),
+                        help='file to load configuration from. \
+                        see examples/sample_data/config.json for an example',
+                        default='./examples/sample_data/config.json')
+    parser.add_argument('--state_id', type=unicode,
+                        help='state code of area to fetch marginals for',
+                        default='06')
+    parser.add_argument('--puma_id', type=unicode,
+                        help='puma code of area to fetch marginals for',
+                        default='00106')
+    parser.add_argument('--census_api_key', type=unicode,
+                        help='key used to download marginal data from the census'
+                        'http://api.census.gov/data/key_signup.html',
+                        default='')
+    parser.add_argument('--output_dir', type=lambda x: is_valid_file(parser, x),
+                        help='path for output csv', default='.')
+    parser.add_argument('--db_host', type=unicode,
+                        help='hostname of database with pums data', default='localhost')
+    parser.add_argument('--db_database', type=unicode, help='db name')
+    parser.add_argument('--db_schema', type=unicode, help='db schema', default='import')
+    parser.add_argument('--db_user', type=unicode, help='db user', default='postgres')
+    parser.add_argument('--db_password', type=unicode, help='db password')
+    parser.add_argument('--extra_person_fields', type=unicode,
+                        help='comma separated list of person pums fields defined in inputs.py',
+                        default='individual_income')
+    parser.add_argument('--extra_household_fields', type=unicode,
+                        help='comma separated list of household pums fields defined in inputs.py',
+                        default='household_income,num_vehicles')
+    return parser.parse_args()
+
+
 def load_config(configuration):
     '''Load the Doppelganger configuration file with the preprocessor object that creates
     methods to apply to the household and person PUMS data.'''
@@ -75,6 +118,7 @@ def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_dat
     # Person Network with Age Segmentation
     def person_segmentation(x): return x[inputs.AGE.name]
 
+    # Write the persons bayes net to disk
     person_training_data = SegmentedData.from_data(
         persons_data,
         list(configuration.person_fields),
@@ -87,15 +131,12 @@ def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_dat
         configuration.person_fields
     )
 
-    # The Bayesian Network can be written to disk and read from disk as follows.
-
     person_model_filename = os.path.join(
                 output_dir, 'state_{}_puma_{}_person_model.json'.format(state_id, puma_id)
             )
     person_model.write(person_model_filename)
 
-    # Following the same steps as above, you can also build a household network.
-
+    # Write the household bayes net to disk
     def household_segmenter(x): x[inputs.NUM_PEOPLE.name]
 
     household_training_data = SegmentedData.from_data(
@@ -165,42 +206,6 @@ def is_valid_file(parser, arg):
         parser.error("The file %s does not exist!" % arg)
     else:
         return arg
-
-
-def parse_args():
-    parser = argparse.ArgumentParser('Fetch census marginal data, and generate population.')
-    parser.add_argument('--puma_tract_mappings_csv', type=lambda x: is_valid_file(parser, x),
-                        help='csv with (state, county, tract, puma)',
-                        default='./examples/sample_data/2010_puma_tract_mapping.txt')
-    parser.add_argument('--config_file', type=lambda x: is_valid_file(parser, x),
-                        help='file to load configuration from. \
-                        see examples/sample_data/config.json for an example',
-                        default='./examples/sample_data/config.json')
-    parser.add_argument('--state_id', type=unicode,
-                        help='state code of area to fetch marginals for',
-                        default='06')
-    parser.add_argument('--puma_id', type=unicode,
-                        help='puma code of area to fetch marginals for',
-                        default='00106')
-    parser.add_argument('--census_api_key', type=unicode,
-                        help='key used to download marginal data from the census'
-                        'http://api.census.gov/data/key_signup.html',
-                        default='')
-    parser.add_argument('--output_dir', type=lambda x: is_valid_file(parser, x),
-                        help='path for output csv', default='.')
-    parser.add_argument('--db_host', type=unicode,
-                        help='hostname of database with pums data', default='localhost')
-    parser.add_argument('--db_database', type=unicode, help='db name')
-    parser.add_argument('--db_schema', type=unicode, help='db schema', default='import')
-    parser.add_argument('--db_user', type=unicode, help='db user', default='postgres')
-    parser.add_argument('--db_password', type=unicode, help='db password')
-    parser.add_argument('--extra_person_fields', type=unicode,
-                        help='comma separated list of person pums fields defined in inputs.py',
-                        default='individual_income')
-    parser.add_argument('--extra_household_fields', type=unicode,
-                        help='comma separated list of household pums fields defined in inputs.py',
-                        default='household_income,num_vehicles')
-    return parser.parse_args()
 
 
 def main():
