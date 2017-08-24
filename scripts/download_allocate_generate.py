@@ -23,7 +23,7 @@ def parse_args():
                 1. Download pums data from a database if necessary.
                     Skipped if data is already found.
                 2. Fetch census marginal data
-                3. Generate population
+                3. Generate population and households
                 '''
             )
     parser.add_argument('--puma_tract_mappings_csv', type=lambda x: is_valid_file(parser, x),
