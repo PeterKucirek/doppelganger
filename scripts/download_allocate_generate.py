@@ -156,17 +156,8 @@ def generate_synthetic_people_and_households(state_id, puma_id, output_dir, allo
     merge_cols = ['tract', 'serial_number', 'repeat_index']
     combined = pd.merge(people, households, on=merge_cols)
     combined.to_csv(os.path.join(
-            output_dir, 'state_{}_puma_{}_generated_combined.csv'.format(state_id, puma_id)
+            output_dir, 'state_{}_puma_{}_generated.csv'.format(state_id, puma_id)
         ))
-
-    # Write to disk:
-    generated_people_filename = os.path.join(
-            output_dir, 'state_{}_puma_{}_generated_people.csv'.format(state_id, puma_id)
-        )
-    generated_households_filename = os.path.join(
-            output_dir, 'state_{}_puma_{}_generated_households.csv'.format(state_id, puma_id)
-        )
-    population.write(generated_people_filename, generated_households_filename)
 
 
 def is_valid_file(parser, arg):
