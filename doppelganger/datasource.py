@@ -42,13 +42,20 @@ class PumsData(DirtyDataSource):
         return super(PumsData, self).__init__(data, name_map)
 
     @staticmethod
-    def from_database(
-        conn, state_id, puma_id, table_name, fields
-    ):
+    def from_database(conn, state_id, puma_id, schema_name, table_name, fields):
         columns = ', '.join(field.pums_name for field in fields)
-        query = (
-            'SELECT {} FROM import.{} WHERE ST=\'{}\' AND PUMA=\'{}\' ORDER BY SERIALNO'
-        ).format(columns, table_name, state_id, puma_id)
+        query = ('''
+            SELECT {columns}
+            FROM {schema}.{table}
+            WHERE ST=\'{state_id}\' AND PUMA=\'{puma_id}\'
+            ORDER BY SERIALNO
+            ;''').format(
+                columns=columns,
+                schema=schema_name,
+                table=table_name,
+                state_id=state_id,
+                puma_id=puma_id
+            )
         return PumsData(pandas.read_sql_query(query, conn))
 
     @staticmethod
