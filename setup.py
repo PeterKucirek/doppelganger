@@ -18,7 +18,9 @@ setup(
         'pomegranate==0.7.1',
         'requests>=2.0.0',
         'six>=1.10.0',
-        'future>=0.16.0'
+        'future>=0.16.0',
+        'enum>=0.4.6',
+        'psycopg2==2.7.3.1',
     ],
     extras_require={
         'tests': [

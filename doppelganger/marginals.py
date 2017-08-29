@@ -102,8 +102,8 @@ class Marginals(object):
                 of PUMAs to fetch data for
 
             census_key (unicode): census API key
-
-            pumas (iterable of unicode): a list of pumas to fetch for.  If the
+            state (unicode): state fips code
+            pumas (iterable of unicode): a single puma or a list of pumas to fetch for.  If the
                 parameter is not passed in will fetch for all pumas in
                 puma_tract_mappings
 
@@ -118,7 +118,12 @@ class Marginals(object):
 
         for line in puma_tract_mappings:
             if state is None or pumas is None\
-                    or line['STATEFP'] != state or line['PUMA5CE'] not in pumas:
+                    or line['STATEFP'] != state\
+                    or (
+                            line['PUMA5CE'] not in pumas
+                            and
+                            line['PUMA5CE'] != pumas
+                       ):
                 continue
             state_key = line['STATEFP']
             tract_key = line['TRACTCE']

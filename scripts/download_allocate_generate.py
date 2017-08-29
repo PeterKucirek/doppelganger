@@ -1,31 +1,47 @@
+from __future__ import (
+    absolute_import, division, print_function, unicode_literals
+)
 import argparse
 import csv
 import os
 import pandas as pd
 from doppelganger import (
-    allocation,
     inputs,
+    datasource,
     Configuration,
     HouseholdAllocator,
-    PumsData,
     SegmentedData,
     BayesianNetworkModel,
     Population,
-    Preprocessor,
-    Marginals
+    Marginals,
 )
-import fetch_puma_data_from_db
+import fetch_pums_data_from_db
+
+FILE_PATTERN = 'state_{}_puma_{}_{}'
 
 
 def parse_args():
+    '''Allow the parsing of command line parameters to this program. Essentially establishes an
+    interface for other programs to use doppelganger to generate synthetic populations.
+    Args:
+        None
+    Returns:
+        A dictionary of parsed arguments.
+        Ex. {'config_file': './config.json', 'state_id':'06', 'puma_id': '00106'}
+    '''
     parser = argparse.ArgumentParser(
-                '''Run doppelganger on a state and puma
-                1. Download pums data from a database if necessary.
-                    Skipped if data is already found.
-                2. Fetch census marginal data
-                3. Generate population and households
-                '''
-            )
+        '''Run doppelganger on a state and puma
+
+        1. Download pums data from a postgres database if necessary.
+            A 'person' and 'household' table is assumed, and must share fields with the
+            PUMS 2015 1-year product.
+            https://www2.census.gov/programs-surveys/acs/tech_docs/pums/data_dict/PUMSDataDict15.pdf
+            Skipped if data is already found.
+        2. Fetch census marginal (currently tract-level) data using a Census API key.
+        3. Generate population and households
+
+        '''
+    )
     parser.add_argument('--puma_tract_mappings_csv', type=lambda x: is_valid_file(parser, x),
                         help='csv with (state, county, tract, puma)',
                         default='./examples/sample_data/2010_puma_tract_mapping.txt')
@@ -51,70 +67,66 @@ def parse_args():
     parser.add_argument('--db_schema', type=unicode, help='db schema', default='import')
     parser.add_argument('--db_user', type=unicode, help='db user', default='postgres')
     parser.add_argument('--db_password', type=unicode, help='db password')
-    parser.add_argument('--extra_person_fields', type=unicode,
-                        help='comma separated list of person pums fields defined in inputs.py',
-                        default='individual_income')
-    parser.add_argument('--extra_household_fields', type=unicode,
-                        help='comma separated list of household pums fields defined in inputs.py',
-                        default='household_income,num_vehicles')
     return parser.parse_args()
 
 
-def load_config(configuration):
-    '''Load the Doppelganger configuration file with the preprocessor object that creates
-    methods to apply to the household and person PUMS data.'''
-    return Preprocessor.from_config(configuration.preprocessing_config)
-
-
 def download_and_load_pums_data(
-        output_dir, state_id, puma_id,
-        preprocessor, configuration,
-        db_host, db_database, db_schema, db_user, db_password,
-        extra_person_fields, extra_household_fields
+        output_dir, state_id, puma_id, configuration,
+        db_host, db_database, db_schema, db_user, db_password
         ):
-    '''Does the file pums files already exist --
+    '''Do the pums files already exist --
             if no - read from db, write csv; load the csv
             if yes - load csv file
+
+    Args:
+        output_dir: place to look for and write pums household and person data files
+        state_id: 2-digit state fips code
+        puma_id: 5-digit puma code
+        configuration: keeps track of which variables/models belong to households and persons
+        db_host: hostname of the POSTGRESQL instance to connect to
+        db_database: database name to connect to
+        db_schema: schema which _must_ contain a person and household table with pums fields
+            referenced in doppelganger/inputs.py
+        db_user: username to connect with
+        db_password: password to authenticate to the database
+    Returns:
+        Household and Person dataframes with the pums fields specified above.
     '''
-    household_filename = 'state_{}_puma_{}_households_data.csv'.format(state_id, puma_id)
+    household_filename = FILE_PATTERN.format(state_id, puma_id, 'households_pums.csv')
     household_path = os.path.sep.join([output_dir, household_filename])
-    person_filename = 'state_{}_puma_{}_persons_data.csv'.format(state_id, puma_id)
+    person_filename = FILE_PATTERN.format(state_id, puma_id, 'persons_pums.csv')
     person_path = os.path.sep.join([output_dir, person_filename])
 
-    ''' Person Data
-    The allocation.DEFAULT_PERSON_FIELDS defines a set of fields that can be used to create the
-    persons_data; we take the union of these defaults with those defined in the person_categories
-    section of the configuration file. This data is then extracted from the raw/dirty PUMS data.
-    '''
     if not os.path.exists(household_path) or not os.path.exists(person_path):
-        print 'Downloading data from the db'
-        fetch_puma_data_from_db.fetch_data(
-                output_dir, state_id, puma_id, db_host, db_database,
-                db_schema, db_user, db_password,
-                extra_person_fields, extra_household_fields
-                )
+        print('Data not found at: \n{}\n or {}. Downloading data from the db'
+              .format(household_path, person_path))
+        households_data, persons_data = fetch_pums_data_from_db.fetch_pums_data(
+                state_id, puma_id, configuration,
+                db_host, db_database, db_schema, db_user, db_password,
+            )
+        # Write data to files, so mustn't be downloaded again
+        households_data.data.to_csv(household_path)
+        persons_data.data.to_csv(person_path)
 
-    household_fields = tuple(set(
-        field.name for field in allocation.DEFAULT_HOUSEHOLD_FIELDS).union(
-            set(configuration.household_fields)
-    ))
-
-    households_data = PumsData.from_csv(household_path).clean(
-            household_fields, preprocessor, puma=puma_id)
-
-    persons_fields = tuple(set(
-        field.name for field in allocation.DEFAULT_PERSON_FIELDS).union(
-            set(configuration.person_fields)
-    ))
-
-    persons_data = PumsData.from_csv(os.path.sep.join(
-            [output_dir, person_filename])).clean(persons_fields, preprocessor, puma=puma_id)
-    # TODO add state filter?
+    households_data = datasource.CleanedData.from_csv(household_path)
+    persons_data = datasource.CleanedData.from_csv(person_path)
 
     return households_data, persons_data
 
 
 def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_data, configuration):
+    '''Create a bayes net from pums dataframes and a configuration.
+    Args:
+        state_id: 2-digit state fips code
+        puma_id: 5-digit puma code
+        output_dir: dir to write out the generated bayesian nets to
+        households_data: pums households data frame
+        persons_data: pums persons data frame
+        configuration: specifies the structure of the bayes net
+    Returns:
+        household and person bayesian models
+        TODO allow custom segmentation functions to be passed into this function
+    '''
     # Person Network with Age Segmentation
     def person_segmentation(x): return x[inputs.AGE.name]
 
@@ -132,7 +144,7 @@ def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_dat
     )
 
     person_model_filename = os.path.join(
-                output_dir, 'state_{}_puma_{}_person_model.json'.format(state_id, puma_id)
+                output_dir, FILE_PATTERN.format(state_id, puma_id, 'person_model.json')
             )
     person_model.write(person_model_filename)
 
@@ -152,18 +164,36 @@ def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_dat
     )
 
     household_model_filename = os.path.join(
-                output_dir, 'state_{}_puma_{}_household_model.json'.format(state_id, puma_id)
+                output_dir, FILE_PATTERN.format(state_id, puma_id, 'household_model.json')
             )
     household_model.write(household_model_filename)
     return household_model, person_model
 
 
-def allocate(state_id, puma_id, output_dir, census_api_key, puma_tract_mappings,
-             households_data, persons_data):
-    # Allocate PUMS households to the PUMA
+class CensusFetchException(Exception):
+    pass
+
+
+def download_tract_data(state_id, puma_id, output_dir, census_api_key, puma_tract_mappings,
+                        households_data, persons_data):
+    '''Download tract data from the US Census' API.
+    Initilize an allocator, capable of allocating PUMS households as best as possible based on
+    marginal census (currently tract) data using a cvx-solver.
+
+    Args:
+        state_id: 2-digit state fips code
+        puma_id: 5-digit puma code
+        output_dir: dir to write out the generated bayesian nets to
+        households_data: pums households data frame
+        persons_data: pums persons data frame
+        configuration: specifies the structure of the bayes net
+
+    Returns:
+        An allocator described above.
+    '''
 
     marginal_filename = os.path.join(
-                output_dir, 'state_{}_puma_{}_marginals.csv'.format(state_id, puma_id)
+                output_dir, FILE_PATTERN.format(state_id, puma_id, 'marginals.csv')
             )
 
     try:  # Already have marginals file
@@ -172,9 +202,12 @@ def allocate(state_id, puma_id, output_dir, census_api_key, puma_tract_mappings,
         with open(puma_tract_mappings) as csv_file:
             csv_reader = csv.DictReader(csv_file)
             marginals = Marginals.from_census_data(
-                csv_reader, census_api_key, state=state_id, puma=puma_id
+                csv_reader, census_api_key, state=state_id, pumas=puma_id
             )
-            marginals.write(marginal_filename)
+            if len(marginals.data) <= 1:
+                raise CensusFetchException()
+            else:
+                marginals.write(marginal_filename)
         controls = Marginals.from_csv(marginal_filename)
 
     '''With the above marginal controls, the methods in allocation.py allocate discrete PUMS
@@ -186,7 +219,18 @@ def allocate(state_id, puma_id, output_dir, census_api_key, puma_tract_mappings,
 
 def generate_synthetic_people_and_households(state_id, puma_id, output_dir, allocator,
                                              person_model, household_model):
-    # Replace the PUMS Persons with Synthetic Persons created from the Bayesian Network
+    '''Replace the PUMS Persons with Synthetic Persons created from the Bayesian Network.
+       Writes out a combined person-household dataframe.
+    Args:
+        state_id: 2-digit state fips code
+        puma_id: 5-digit puma code
+        allocator: PUMS households as best as possible based on marginal census (currently tract)
+            data using a cvx-solver.
+        person_model: bayesian model describing the discritized pums fields' relation to one another
+        household_model: same as person_model but for households
+    Returns:
+        combined: joined pandas dataframe of generated households and persons
+    '''
     population = Population.generate(allocator, person_model, household_model)
     people = population.generated_people
     households = population.generated_households
@@ -197,15 +241,23 @@ def generate_synthetic_people_and_households(state_id, puma_id, output_dir, allo
     merge_cols = ['tract', 'serial_number', 'repeat_index']
     combined = pd.merge(people, households, on=merge_cols)
     combined.to_csv(os.path.join(
-            output_dir, 'state_{}_puma_{}_generated.csv'.format(state_id, puma_id)
+            output_dir, FILE_PATTERN.format(state_id, puma_id, 'generated.csv')
         ))
+    return combined
 
 
-def is_valid_file(parser, arg):
-    if not os.path.exists(arg):
-        parser.error("The file %s does not exist!" % arg)
+def is_valid_file(parser, filename):
+    '''Convenience function to validate files passed into the argument parser
+    Args:
+        parser: a python argument parser
+        filename: name of file to validate
+    Returns: filename
+    Raises: ParserError
+    '''
+    if not os.path.exists(filename):
+        parser.error("The file %s does not exist!" % filename)
     else:
-        return arg
+        return filename
 
 
 def main():
@@ -221,17 +273,12 @@ def main():
     db_schema = args.db_schema
     db_user = args.db_user
     db_password = args.db_password
-    extra_person_fields = args.extra_person_fields
-    extra_household_fields = args.extra_household_fields
 
     configuration = Configuration.from_file(config_file)
 
-    preprocessor = load_config(configuration)
-
     households_data, persons_data = download_and_load_pums_data(
                 output_dir, state_id, puma_id,
-                preprocessor, configuration, db_host, db_database, db_schema, db_user, db_password,
-                extra_person_fields, extra_household_fields
+                configuration, db_host, db_database, db_schema, db_user, db_password
             )
 
     household_model, person_model = create_bayes_net(
@@ -239,7 +286,7 @@ def main():
                 households_data, persons_data, configuration
             )
 
-    allocator = allocate(
+    allocator = download_tract_data(
                 state_id, puma_id, output_dir, census_api_key, puma_tract_mappings,
                 households_data, persons_data
             )
