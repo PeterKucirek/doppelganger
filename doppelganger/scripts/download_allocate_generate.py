@@ -4,10 +4,10 @@ from __future__ import (
 import argparse
 import csv
 import os
-import pandas as pd
+import pandas
 from doppelganger import (
     inputs,
-    datasource,
+    CleanedData,
     Configuration,
     HouseholdAllocator,
     SegmentedData,
@@ -15,9 +15,15 @@ from doppelganger import (
     Population,
     Marginals,
 )
-import fetch_pums_data_from_db
+from doppelganger.scripts.fetch_pums_data_from_db import fetch_pums_data
 
 FILE_PATTERN = 'state_{}_puma_{}_{}'
+
+
+def person_segmenter(x): return x[inputs.AGE.name]
+
+
+def household_segmenter(x): return x[inputs.NUM_PEOPLE.name]
 
 
 def parse_args():
@@ -100,21 +106,24 @@ def download_and_load_pums_data(
     if not os.path.exists(household_path) or not os.path.exists(person_path):
         print('Data not found at: \n{}\n or {}. Downloading data from the db'
               .format(household_path, person_path))
-        households_data, persons_data = fetch_pums_data_from_db.fetch_pums_data(
-                state_id, puma_id, configuration,
-                db_host, db_database, db_schema, db_user, db_password,
+
+        households_data, persons_data = fetch_pums_data(
+                state_id=state_id, puma_id=puma_id, configuration=configuration,
+                db_host=db_host, db_database=db_database, db_schema=db_schema,
+                db_user=db_user, db_password=db_password,
             )
         # Write data to files, so mustn't be downloaded again
         households_data.data.to_csv(household_path)
         persons_data.data.to_csv(person_path)
-
-    households_data = datasource.CleanedData.from_csv(household_path)
-    persons_data = datasource.CleanedData.from_csv(person_path)
+    else:
+        households_data = CleanedData.from_csv(household_path)
+        persons_data = CleanedData.from_csv(person_path)
 
     return households_data, persons_data
 
 
-def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_data, configuration):
+def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_data, configuration,
+                     person_segmenter, household_segmenter):
     '''Create a bayes net from pums dataframes and a configuration.
     Args:
         state_id: 2-digit state fips code
@@ -123,24 +132,23 @@ def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_dat
         households_data: pums households data frame
         persons_data: pums persons data frame
         configuration: specifies the structure of the bayes net
+        person_segmenter: function of inputs data to segment on a person variable
+        household_segmenter: function of inputs data to segment on a household variable
     Returns:
         household and person bayesian models
-        TODO allow custom segmentation functions to be passed into this function
     '''
-    # Person Network with Age Segmentation
-    def person_segmentation(x): return x[inputs.AGE.name]
 
     # Write the persons bayes net to disk
     person_training_data = SegmentedData.from_data(
-        persons_data,
-        list(configuration.person_fields),
-        inputs.PERSON_WEIGHT.name,
-        person_segmentation
+        cleaned_data=persons_data,
+        fields=list(configuration.person_fields),
+        weight_field=inputs.PERSON_WEIGHT.name,
+        segmenter=person_segmenter
     )
     person_model = BayesianNetworkModel.train(
-        person_training_data,
-        configuration.person_structure,
-        configuration.person_fields
+        input_data=person_training_data,
+        structure=configuration.person_structure,
+        fields=configuration.person_fields
     )
 
     person_model_filename = os.path.join(
@@ -148,19 +156,17 @@ def create_bayes_net(state_id, puma_id, output_dir, households_data, persons_dat
             )
     person_model.write(person_model_filename)
 
-    # Write the household bayes net to disk
-    def household_segmenter(x): x[inputs.NUM_PEOPLE.name]
-
+    # Households
     household_training_data = SegmentedData.from_data(
-        households_data,
-        list(configuration.household_fields),
-        inputs.HOUSEHOLD_WEIGHT.name,
-        household_segmenter,
+        cleaned_data=households_data,
+        fields=list(configuration.household_fields),
+        weight_field=inputs.HOUSEHOLD_WEIGHT.name,
+        segmenter=household_segmenter,
     )
     household_model = BayesianNetworkModel.train(
-        household_training_data,
-        configuration.household_structure,
-        configuration.household_fields
+        input_data=household_training_data,
+        structure=configuration.household_structure,
+        fields=configuration.household_fields
     )
 
     household_model_filename = os.path.join(
@@ -184,20 +190,22 @@ def download_tract_data(state_id, puma_id, output_dir, census_api_key, puma_trac
         state_id: 2-digit state fips code
         puma_id: 5-digit puma code
         output_dir: dir to write out the generated bayesian nets to
+        census_api_key: key used to download data from the U.S. Census
+        puma_tract_mappings: filepath to the puma-tract mappings
         households_data: pums households data frame
         persons_data: pums persons data frame
-        configuration: specifies the structure of the bayes net
 
     Returns:
         An allocator described above.
     '''
 
-    marginal_filename = os.path.join(
+    marginal_path = os.path.join(
                 output_dir, FILE_PATTERN.format(state_id, puma_id, 'marginals.csv')
             )
 
+    # if os.path.exists(marginal_path):
     try:  # Already have marginals file
-        controls = Marginals.from_csv(marginal_filename)
+        controls = Marginals.from_csv(marginal_path)
     except:  # Download marginal data from the Census API
         with open(puma_tract_mappings) as csv_file:
             csv_reader = csv.DictReader(csv_file)
@@ -207,13 +215,17 @@ def download_tract_data(state_id, puma_id, output_dir, census_api_key, puma_trac
             if len(marginals.data) <= 1:
                 raise CensusFetchException()
             else:
-                marginals.write(marginal_filename)
-        controls = Marginals.from_csv(marginal_filename)
+                marginals.write(marginal_path)
+        controls = Marginals.from_csv(marginal_path)
 
-    '''With the above marginal controls, the methods in allocation.py allocate discrete PUMS
-    households to the subject PUMA.'''
+    '''With the above marginal controls (tract data), the methods in allocation.py
+    allocate discrete PUMS households to the subject PUMA.'''
 
-    allocator = HouseholdAllocator.from_cleaned_data(controls, households_data, persons_data)
+    allocator = HouseholdAllocator.from_cleaned_data(
+                marginals=controls,
+                households_data=households_data,
+                persons_data=persons_data
+            )
     return allocator
 
 
@@ -221,6 +233,7 @@ def generate_synthetic_people_and_households(state_id, puma_id, output_dir, allo
                                              person_model, household_model):
     '''Replace the PUMS Persons with Synthetic Persons created from the Bayesian Network.
        Writes out a combined person-household dataframe.
+
     Args:
         state_id: 2-digit state fips code
         puma_id: 5-digit puma code
@@ -228,10 +241,15 @@ def generate_synthetic_people_and_households(state_id, puma_id, output_dir, allo
             data using a cvx-solver.
         person_model: bayesian model describing the discritized pums fields' relation to one another
         household_model: same as person_model but for households
+
     Returns:
         combined: joined pandas dataframe of generated households and persons
     '''
-    population = Population.generate(allocator, person_model, household_model)
+    population = Population.generate(
+                household_allocator=allocator,
+                person_model=person_model,
+                household_model=household_model
+            )
     people = population.generated_people
     households = population.generated_households
 
@@ -239,7 +257,7 @@ def generate_synthetic_people_and_households(state_id, puma_id, output_dir, allo
     tract, serial_number, and repeat_index:'''
 
     merge_cols = ['tract', 'serial_number', 'repeat_index']
-    combined = pd.merge(people, households, on=merge_cols)
+    combined = pandas.merge(people, households, on=merge_cols)
     combined.to_csv(os.path.join(
             output_dir, FILE_PATTERN.format(state_id, puma_id, 'generated.csv')
         ))
@@ -283,7 +301,8 @@ def main():
 
     household_model, person_model = create_bayes_net(
                 state_id, puma_id, output_dir,
-                households_data, persons_data, configuration
+                households_data, persons_data, configuration,
+                person_segmenter, household_segmenter
             )
 
     allocator = download_tract_data(

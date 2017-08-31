@@ -7,11 +7,9 @@ from .datasource import PumsData, CleanedData, DirtyDataSource
 from .marginals import Marginals
 from .preprocessing import Preprocessor
 from .populationgen import Population
-# from .scripts.fetch_pums_data_from_db import link_fields_to_inputs
 
 # Enumerate exports, to make the linter happy.
 __all__ = [
     HouseholdAllocator, SegmentedData, BayesianNetworkModel, Configuration,
     PumsData, CleanedData, Marginals, Population, Preprocessor, DirtyDataSource,
-    # link_fields_to_inputs
 ]

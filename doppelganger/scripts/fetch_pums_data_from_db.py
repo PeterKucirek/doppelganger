@@ -23,8 +23,10 @@ def fetch_pums_data(state_id, puma_id, configuration,
             referenced in doppelganger/inputs.py
         db_user: username to connect with
         db_password: password to authenticate to the database
+
     Returns:
-        person_data: a dataframe whose fields have been mapped according to inputs.py
+        person_data: a PumsData wrapped dataframe whose fields have been mapped according to
+            inputs.py
         households_data: same as person_data but for households
     '''
 
@@ -81,4 +83,4 @@ def link_fields_to_inputs(input_list):
     input_name_map = {x.name: x for x in inputs.PUMS_INPUTS}
     if not all(x in input_name_map.keys() for x in input_list):
         raise ValueError('One or more extra fields not registered in doppelganger/inputs.py')
-    return [input_name_map[i] for i in input_list]
+    return set([input_name_map[i] for i in input_list])
