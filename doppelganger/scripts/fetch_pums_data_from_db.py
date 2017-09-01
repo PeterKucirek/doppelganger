@@ -34,13 +34,11 @@ def fetch_pums_data(state_id, puma_id, configuration,
 
     # Union default and extra fields
     person_fields = link_fields_to_inputs(configuration.person_fields)
-    person_fields =\
-        allocation.DEFAULT_PERSON_FIELDS.union(set(person_fields))
+    person_fields = allocation.DEFAULT_PERSON_FIELDS.union(person_fields)
     person_fieldnames = tuple(set(p.name for p in person_fields))
 
     household_fields = link_fields_to_inputs(configuration.household_fields)
-    household_fields =\
-        allocation.DEFAULT_HOUSEHOLD_FIELDS.union(set(household_fields))
+    household_fields = allocation.DEFAULT_HOUSEHOLD_FIELDS.union(household_fields)
     household_fieldnames = tuple(set(hh.name for hh in household_fields))
 
     puma_conn = None
@@ -53,12 +51,32 @@ def fetch_pums_data(state_id, puma_id, configuration,
         )
 
         households_data = datasource.PumsData.from_database(
-            puma_conn, state_id, puma_id, db_schema, HOUSEHOLD_TABLE, household_fields
-        ).clean(household_fieldnames, preprocessor, state=state_id, puma=puma_id)
+            conn=puma_conn,
+            state_id=state_id,
+            puma_id=puma_id,
+            schema_name=db_schema,
+            table_name=HOUSEHOLD_TABLE,
+            fields=household_fields
+        ).clean(
+            field_names=household_fieldnames,
+            preprocessor=preprocessor,
+            state=state_id,
+            puma=puma_id
+        )
 
         persons_data = datasource.PumsData.from_database(
-            puma_conn, state_id, puma_id, db_schema, PERSONS_TABLE, person_fields
-        ).clean(person_fieldnames, preprocessor, state=state_id, puma=puma_id)
+            conn=puma_conn,
+            state_id=state_id,
+            puma_id=puma_id,
+            schema_name=db_schema,
+            table_name=PERSONS_TABLE,
+            fields=household_fields
+        ).clean(
+            field_names=person_fieldnames,
+            preprocessor=preprocessor,
+            state=state_id,
+            puma=puma_id
+        )
 
     except psycopg2.DatabaseError as error:
         print(error)
@@ -78,7 +96,7 @@ def link_fields_to_inputs(input_list):
         input_list: list of variable names defined in doppelganger/inputs.py
 
     Returns:
-        list of PUMS_INPUTS objects for use in PumsData.from_database
+        set of PUMS_INPUTS objects for use in PumsData.from_database
     '''
     input_name_map = {x.name: x for x in inputs.PUMS_INPUTS}
     if not all(x in input_name_map.keys() for x in input_list):
