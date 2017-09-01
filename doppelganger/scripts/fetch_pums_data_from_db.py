@@ -70,7 +70,7 @@ def fetch_pums_data(state_id, puma_id, configuration,
             puma_id=puma_id,
             schema_name=db_schema,
             table_name=PERSONS_TABLE,
-            fields=household_fields
+            fields=person_fields
         ).clean(
             field_names=person_fieldnames,
             preprocessor=preprocessor,
