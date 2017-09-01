@@ -215,8 +215,8 @@ class TestDownloadAllocateGenerate(unittest.TestCase):
         )
         self.assertFalse(mock_Marginals.from_census_data.called)
 
-    @mock.patch('builtins.open')
-    # @mock.patch('__builtin__.open')
+    @mock.patch('builtins.open')  # python 3 compatible
+    # @mock.patch('__builtin__.open')  # python 2 compatible
     @mock.patch('doppelganger.scripts.download_allocate_generate.HouseholdAllocator')
     @mock.patch('doppelganger.scripts.download_allocate_generate.Marginals')
     def test_download_tracts_data_download(self, mock_Marginals, mock_HouseholdAllocator,
