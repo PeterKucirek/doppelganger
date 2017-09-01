@@ -54,24 +54,24 @@ def parse_args():
                         help='file to load configuration from. \
                         see examples/sample_data/config.json for an example',
                         default='./examples/sample_data/config.json')
-    parser.add_argument('--state_id', type=unicode,
+    parser.add_argument('--state_id', type=str,
                         help='state code of area to fetch marginals for',
                         default='06')
-    parser.add_argument('--puma_id', type=unicode,
+    parser.add_argument('--puma_id', type=str,
                         help='puma code of area to fetch marginals for',
                         default='00106')
-    parser.add_argument('--census_api_key', type=unicode,
+    parser.add_argument('--census_api_key', type=str,
                         help='key used to download marginal data from the census'
                         'http://api.census.gov/data/key_signup.html',
                         default='')
     parser.add_argument('--output_dir', type=lambda x: is_valid_file(parser, x),
                         help='path for output csv', default='.')
-    parser.add_argument('--db_host', type=unicode,
+    parser.add_argument('--db_host', type=str,
                         help='hostname of database with pums data', default='localhost')
-    parser.add_argument('--db_database', type=unicode, help='db name')
-    parser.add_argument('--db_schema', type=unicode, help='db schema', default='import')
-    parser.add_argument('--db_user', type=unicode, help='db user', default='postgres')
-    parser.add_argument('--db_password', type=unicode, help='db password')
+    parser.add_argument('--db_database', type=str, help='db name')
+    parser.add_argument('--db_schema', type=str, help='db schema', default='import')
+    parser.add_argument('--db_user', type=str, help='db user', default='postgres')
+    parser.add_argument('--db_password', type=str, help='db password')
     return parser.parse_args()
 
 
